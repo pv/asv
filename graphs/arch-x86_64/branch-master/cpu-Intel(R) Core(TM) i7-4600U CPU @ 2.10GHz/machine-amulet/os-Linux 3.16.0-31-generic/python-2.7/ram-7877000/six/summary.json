@@ -1,0 +1,28 @@
+[
+    {
+        "change_rev": [
+            1650, 
+            1745
+        ], 
+        "idx": null, 
+        "last_err": 0.007319137608333338, 
+        "last_rev": 1915, 
+        "last_value": 0.14318499045, 
+        "name": "step_detect.Simple.time_detect_regressions", 
+        "pretty_name": "step_detect.Simple.time_detect_regressions", 
+        "prev_value": 0.577196001
+    }, 
+    {
+        "change_rev": [
+            1650, 
+            1745
+        ], 
+        "idx": null, 
+        "last_err": 9.81799958333335e-05, 
+        "last_rev": 1915, 
+        "last_value": 0.01116438652, 
+        "name": "step_detect.Simple.time_solve_potts_approx", 
+        "pretty_name": "step_detect.Simple.time_solve_potts_approx", 
+        "prev_value": 0.18558931990000002
+    }
+]
