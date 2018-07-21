@@ -1,17 +1,12 @@
 0.2.3 (unreleased)
 ------------------
 
-New Features
-^^^^^^^^^^^^
-
-API Changes
-^^^^^^^^^^^
-
 Bug Fixes
 ^^^^^^^^^
 
-Other Changes and Additions
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+- Fix encoding issue with saving profile data (#680)
+- Fix snakeviz plugin (#681)
+- Fix logging usage (#682)
 
 
 0.2.2 (2018-07-14)
