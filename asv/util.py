@@ -414,8 +414,13 @@ class DebugLogBuffer(object):
         self.first = True
         self.linebreak_re = re.compile(b'.*\n')
         self.log = log
+        self.lock = threading.Lock()
 
     def __call__(self, c):
+        with self.lock:
+            self._process(c)
+
+    def _process(self, c):
         if c is None:
             text = b"".join(self.buf)
             del self.buf[:]
@@ -629,6 +634,9 @@ def check_output(args, valid_return_codes=(0,), timeout=600, dots=True,
             # Wait a bit for the reader threads, if they're alive
             for thread in all_threads:
                 thread.join(0.1)
+
+        # Disconnect debug log, if any
+        debug_log = lambda c: None
 
         # Wait for process to exit
         proc.wait()
