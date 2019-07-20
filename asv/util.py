@@ -564,6 +564,7 @@ def check_output(args, valid_return_codes=(0,), timeout=600, dots=True,
 
     if log.is_debug_enabled():
         debug_log = DebugLogBuffer(log)
+        dots = False
     else:
         debug_log = lambda c: None
 
@@ -611,6 +612,18 @@ def check_output(args, valid_return_codes=(0,), timeout=600, dots=True,
                         proc.send_signal(signal.CTRL_BREAK_EVENT)
                     threads.pop(0)
                     continue
+
+            if dots:
+                dot_remaining = 0.5 - (time.time() - last_dot_time)
+                if dot_remaining <= 0:
+                    if dots is True:
+                        log.dot()
+                    elif dots:
+                        dots()
+                    last_dot_time = time.time()
+                    dot_remaining = 0.5
+
+                remaining = min(dot_remaining, remaining)
 
             thread.join(remaining)
             if not thread.is_alive():
