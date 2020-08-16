@@ -319,8 +319,8 @@ def _compute_graph_steps(data, reraise=True):
 
 
 def make_summary_graph(graphs):
-    x, ys = _combine_graph_data(graphs)
-    y = _compute_summary_data_series(*ys)
+    x, ys, params = _combine_graph_data(graphs)
+    y = _compute_summary_data_series(x, ys, params)
     val = list(zip(x, y))
 
     # Resample
@@ -333,7 +333,7 @@ def make_summary_graph(graphs):
     return graph
 
 
-def _compute_summary_data_series(*ys):
+def _compute_summary_data_series(x, ys, params):
     """
     Given multiple input series::
 
@@ -350,8 +350,11 @@ def _compute_summary_data_series(*ys):
     all series are however marked missing.
 
     """
+    # Normalize series to make them comparable to each other
+    ys = _normalize_data_series(x, ys, params)
+
     # Fill missing data
-    filled = [_fill_missing_data(y) for y in ys]
+    filled = [_fill_missing_data(x, y) for y in ys]
 
     # Compute geom mean of filled series
     res = []
@@ -366,16 +369,111 @@ def _compute_summary_data_series(*ys):
     return res
 
 
-def _fill_missing_data(y, max_gap_fraction=0.1):
+def _normalize_data_series(x, ys, params):
+    """
+    Normalize data series by multiplying them with some factors.
+
+    Solves for
+    ``1/s[i] = geommean([y[i,k] / (s[j] * y[j,k]) for j != i for k in common_points(i,j)])``
+    i.e. geometric means limited to pairwise common points between data series
+    are close to each other.
+    """
+
+    ratios = {}
+
+    # Compute geometric means of ratios
+    ys_filtered = [[v if not is_na(v) and v != 0 and 1/v != 0 else None for v in y]
+                   for y in ys]
+    for i, yi in enumerate(ys_filtered):
+        for j, yj in enumerate(ys_filtered):
+            if i <= j:
+                continue
+
+            n_common = 0
+            ratio_avg = 1.0
+
+            for yik, yjk in zip(yi, yj):
+                if yik is not None and yjk is not None:
+                    ratio_avg **= n_common/(n_common+1)
+                    ratio_avg *= abs(yik/yjk)**(1/(n_common+1))
+                    n_common += 1
+
+            if not is_na(ratio_avg) and ratio_avg != 0:
+                ratios[i,j] = (n_common, ratio_avg)
+                ratios[j,i] = (n_common, 1/ratio_avg)
+            else:
+                ratios[i,j] = (0, 1.0)
+                ratios[j,i] = (0, 1.0)
+
+    # Fallback/initial guess: normalize for each machine separately
+    s_machine = {}
+    for y, p in zip(ys_filtered, params):
+        n, gavg = s_machine.get(p['machine'], (0, 1.0))
+        for v in y:
+            if v is not None:
+                gavg **= n/(n + 1)
+                gavg *= abs(v)**(1/(n + 1))
+                n += 1
+
+        if gavg != 0 and 1/gavg != 0:
+            s_machine[p['machine']] = (n, gavg)
+
+    s = [1/s_machine.get(p['machine'], (0, 1.0))[1] for p in params] 
+
+    # Solve for scale factors iteratively
+    for m in range(3 + 2*len(s)):
+        s2 = list(s)
+
+        for i in range(len(ys)):
+            ratio = 1.0
+            n_total = 0
+
+            for j in range(len(ys)):
+                if i == j:
+                    continue
+
+                n, z = ratios[i,j]
+                if n == 0:
+                    continue
+
+                ratio **= n_total/(n_total+n)
+                ratio *= (z / s[j])**(n/(n_total+n))
+                n_total += n
+
+            if n_total > 0:
+                try:
+                    s2[i] = 1/ratio * 0.9 + s[i] * 0.1
+                except ZeroDivisionError:
+                    s2[i] = s[i]
+            else:
+                s2[i] = s[i]
+
+        converged = all(abs(a - b) < 1e-4*b for a, b in zip(s, s2))
+        s = s2
+
+        if converged:
+            break
+
+    # Multiply by scale factors
+    ys = [[v*ss if not is_na(v) else None for v in y] for y, ss in zip(ys, s)]
+    return ys
+
+
+def _fill_missing_data(x, y, max_gap_fraction=0.1):
     """
     Fill missing data to series by linearly interpolating inside gaps
-    that are smaller than ``max_gap_fraction`` of total available
-    points.
+    that are smaller than ``max_gap_fraction`` of total covered span.
 
     """
-    # Count number of valid values in each series
-    valid_count = sum(int(not is_na(v)) for v in y)
-    max_gap_size = math.ceil(max_gap_fraction * valid_count)
+    # Determine maximum gap size
+    try:
+        min_x = min(xx for xx, yy in zip(x, y) if not is_na(yy))
+        max_x = max(xx for xx, yy in zip(x, y) if not is_na(yy))
+    except ValueError:
+        min_x = 0
+        max_x = 0
+
+    max_gap_size = max_gap_fraction * (max_x - min_x + 1)
 
     # Fill gaps of missing data in each series
     filled = list(y)
@@ -385,8 +483,9 @@ def _fill_missing_data(y, max_gap_fraction=0.1):
     for i, v in enumerate(y):
         if not is_na(v):
             gap_size = i - prev_idx - 1
+            gap_x_size = x[i] - x[prev_idx]
 
-            if 0 < gap_size <= max_gap_size and not is_na(prev):
+            if 0 < gap_size and gap_x_size <= max_gap_size and not is_na(prev):
                 # Interpolate gap
                 for k in range(1, gap_size + 1):
                     filled[prev_idx + k] = (
@@ -417,10 +516,14 @@ def _combine_graph_data(graphs):
         corresponding to `x`, one for each data series in each graph.
         When some of the graphs do not have data for a given x-value,
         the missing data is indicated by None values.
+    params : list of dict
+        Graph.params for each of the data series
 
     """
     datasets = [graph.get_data() for graph in graphs]
     n_series = sum(graph.n_series for graph in graphs)
+    params = [graph.params for graph in graphs
+              for j in range(graph.n_series)]
 
     # Find distinct x-values
     x = set()
@@ -443,7 +546,7 @@ def _combine_graph_data(graphs):
                 ys[pos + j][i] = y
         pos += graph.n_series
 
-    return x, ys
+    return x, ys, params
 
 
 def resample_data(val, num_points=RESAMPLED_POINTS):
