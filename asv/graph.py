@@ -320,7 +320,7 @@ def _compute_graph_steps(data, reraise=True):
 
 def make_summary_graph(graphs):
     x, ys = _combine_graph_data(graphs)
-    y = _compute_summary_data_series(*ys)
+    y = _compute_summary_data_series(x, ys)
     val = list(zip(x, y))
 
     # Resample
@@ -333,7 +333,7 @@ def make_summary_graph(graphs):
     return graph
 
 
-def _compute_summary_data_series(*ys):
+def _compute_summary_data_series(x, ys):
     """
     Given multiple input series::
 
@@ -351,7 +351,7 @@ def _compute_summary_data_series(*ys):
 
     """
     # Fill missing data
-    filled = [_fill_missing_data(y) for y in ys]
+    filled = [_fill_missing_data(x, y) for y in ys]
 
     # Compute geom mean of filled series
     res = []
@@ -366,16 +366,21 @@ def _compute_summary_data_series(*ys):
     return res
 
 
-def _fill_missing_data(y, max_gap_fraction=0.1):
+def _fill_missing_data(x, y, max_gap_fraction=0.1):
     """
     Fill missing data to series by linearly interpolating inside gaps
-    that are smaller than ``max_gap_fraction`` of total available
-    points.
+    that are smaller than ``max_gap_fraction`` of total covered span.
 
     """
-    # Count number of valid values in each series
-    valid_count = sum(int(not is_na(v)) for v in y)
-    max_gap_size = math.ceil(max_gap_fraction * valid_count)
+    # Determine maximum gap size
+    try:
+        min_x = min(xx for xx, yy in zip(x, y) if not is_na(yy))
+        max_x = max(xx for xx, yy in zip(x, y) if not is_na(yy))
+    except ValueError:
+        min_x = 0
+        max_x = 0
+
+    max_gap_size = max_gap_fraction * (max_x - min_x + 1)
 
     # Fill gaps of missing data in each series
     filled = list(y)
@@ -385,8 +390,9 @@ def _fill_missing_data(y, max_gap_fraction=0.1):
     for i, v in enumerate(y):
         if not is_na(v):
             gap_size = i - prev_idx - 1
+            gap_x_size = x[i] - x[prev_idx]
 
-            if 0 < gap_size <= max_gap_size and not is_na(prev):
+            if 0 < gap_size and gap_x_size <= max_gap_size and not is_na(prev):
                 # Interpolate gap
                 for k in range(1, gap_size + 1):
                     filled[prev_idx + k] = (
